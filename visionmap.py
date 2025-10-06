@@ -783,19 +783,27 @@ class Connection:
     
     def update(self):
         """Atualiza a posição da linha de conexão."""
-        # Calcular os pontos de intersecção com as bordas
-        start_x, start_y = self.calculate_intersection(self.obj1, self.obj2)
-        end_x, end_y = self.calculate_intersection(self.obj2, self.obj1)
-        
-        # Atualizar a linha
-        self.canvas.coords(self.line, start_x, start_y, end_x, end_y)
-        
-        # Garantir que as propriedades da linha (incluindo a seta) sejam mantidas
-        self.canvas.itemconfig(self.line, arrow=tk.LAST if self.arrow else None)
-        
-        # Atualizar posição do rótulo, se houver
-        if self.text_id:
-            self.create_label()  # Recria o rótulo na nova posição
+        try:
+            # Verificar se os objetos conectados ainda existem
+            if not hasattr(self.obj1, 'x') or not hasattr(self.obj2, 'x'):
+                return
+                
+            # Calcular os pontos de intersecção com as bordas
+            start_x, start_y = self.calculate_intersection(self.obj1, self.obj2)
+            end_x, end_y = self.calculate_intersection(self.obj2, self.obj1)
+            
+            # Atualizar a linha
+            self.canvas.coords(self.line, start_x, start_y, end_x, end_y)
+            
+            # Garantir que as propriedades da linha (incluindo a seta) sejam mantidas
+            self.canvas.itemconfig(self.line, arrow=tk.LAST if self.arrow else None)
+            
+            # Atualizar posição do rótulo, se houver
+            if self.text_id:
+                self.create_label()  # Recria o rótulo na nova posição
+        except (AttributeError, tk.TclError, ValueError) as e:
+            print(f"Erro ao atualizar conexão: {e}")
+            return
     
     def set_arrow(self, has_arrow):
         """Define se a conexão tem seta ou não."""
@@ -805,11 +813,14 @@ class Connection:
     def is_clicked(self, event_x, event_y):
         """Verifica se o ponto (event_x, event_y) está sobre a linha de conexão."""
         # Obter as coordenadas atuais da linha
-        coords = self.canvas.coords(self.line)
-        if len(coords) < 4:
+        try:
+            coords = self.canvas.coords(self.line)
+            if not coords or len(coords) < 4:
+                return False
+                
+            x1, y1, x2, y2 = coords
+        except (IndexError, ValueError, tk.TclError):
             return False
-            
-        x1, y1, x2, y2 = coords
         
         # Caso especial: linha vertical
         if x2 - x1 == 0:
@@ -877,22 +888,29 @@ class Connection:
     
     def create_label(self):
         """Cria ou atualiza o texto do rótulo da conexão."""
-        # Se já existe um rótulo, removê-lo primeiro
-        if self.text_id:
-            # Remover também o fundo do texto se existir
-            self.canvas.delete(f"conn_label_bg_{id(self)}")
-            self.canvas.delete(self.text_id)
-            
-        if not self.label_text:
+        try:
+            # Se já existe um rótulo, removê-lo primeiro
+            if self.text_id:
+                # Remover também o fundo do texto se existir
+                try:
+                    self.canvas.delete(f"conn_label_bg_{id(self)}")
+                    self.canvas.delete(self.text_id)
+                except tk.TclError:
+                    pass
+                
+            if not self.label_text:
+                self.text_id = None
+                return
+                
+            # Calcular ponto médio da linha
+            coords = self.canvas.coords(self.line)
+            if not coords or len(coords) < 4:
+                return
+                
+            x1, y1, x2, y2 = coords
+        except (IndexError, ValueError, tk.TclError):
             self.text_id = None
             return
-            
-        # Calcular ponto médio da linha
-        coords = self.canvas.coords(self.line)
-        if len(coords) < 4:
-            return
-            
-        x1, y1, x2, y2 = coords
         mid_x = (x1 + x2) / 2
         mid_y = (y1 + y2) / 2
         
@@ -1020,6 +1038,20 @@ class VisionMapApp:
         self.temp_connection_start = None
         self.resizing_container = None
         
+        # Seleção múltipla
+        self.selected_boxes = []  # Lista de caixas selecionadas
+        self.selected_containers = []  # Lista de containers selecionados
+        self.selection_rectangle = None  # Retângulo de seleção
+        self.selection_start_x = 0
+        self.selection_start_y = 0
+        self.is_selecting = False  # Flag para seleção por arrastar
+        self.is_moving_multiple = False  # Flag para mover múltiplos objetos
+        
+        # Controle de movimento múltiplo
+        self.initial_positions = []  # Posições iniciais dos elementos
+        self.move_start_x = 0  # Posição inicial do mouse X
+        self.move_start_y = 0  # Posição inicial do mouse Y
+        
         # Binds para eventos do mouse
         self.canvas.bind("<Button-1>", self.on_canvas_click)
         self.canvas.bind("<B1-Motion>", self.on_canvas_drag)
@@ -1068,6 +1100,10 @@ class VisionMapApp:
         self.root.bind("<G>", lambda event: self.bring_selected_to_front())
         self.root.bind("<h>", lambda event: self.send_selected_to_back())
         self.root.bind("<H>", lambda event: self.send_selected_to_back())
+        
+        # Atalhos para seleção múltipla
+        self.root.bind("<Control-a>", self.select_all)
+        self.root.bind("<Escape>", self.clear_selection)
     
     def create_menu(self):
         """Cria o menu da aplicação."""
@@ -1098,6 +1134,9 @@ class VisionMapApp:
         edit_menu = tk.Menu(menubar, tearoff=0)
         edit_menu.add_command(label="Selecionar (A)", command=self.set_select_mode)
         edit_menu.add_command(label="Conectar Elementos (E)", command=self.set_connect_mode)
+        edit_menu.add_separator()
+        edit_menu.add_command(label="Selecionar Tudo", command=self.select_all, accelerator="Ctrl+A")
+        edit_menu.add_command(label="Limpar Seleção", command=self.clear_selection, accelerator="Esc")
         edit_menu.add_separator()
         edit_menu.add_command(label="Editar Item", command=self.edit_selected)
         edit_menu.add_command(label="Trocar Cor (F)", command=self.change_box_color)
@@ -1146,6 +1185,19 @@ class VisionMapApp:
         self.color_button = tk.Button(self.toolbar, text="Trocar Cor (F)", 
                                      command=self.change_box_color)
         self.color_button.pack(side=tk.LEFT, padx=5, pady=5)
+        
+        # Separador
+        separator = tk.Frame(self.toolbar, width=2, bg="gray")
+        separator.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        
+        # Botões de seleção múltipla
+        self.select_all_button = tk.Button(self.toolbar, text="Sel. Tudo (Ctrl+A)", 
+                                          command=self.select_all)
+        self.select_all_button.pack(side=tk.LEFT, padx=5, pady=5)
+        
+        self.clear_selection_button = tk.Button(self.toolbar, text="Limpar Sel. (Esc)", 
+                                               command=self.clear_selection)
+        self.clear_selection_button.pack(side=tk.LEFT, padx=5, pady=5)
     
     def reset_toolbar_buttons(self):
         """Reseta todos os botões da barra de ferramentas."""
@@ -1160,7 +1212,7 @@ class VisionMapApp:
         self.mode = "select"
         self.reset_toolbar_buttons()
         self.select_button.config(relief=tk.SUNKEN)
-        self.statusbar.config(text="Modo: Selecionar e mover itens")
+        self.statusbar.config(text="Modo: Selecionar e mover itens | Ctrl+clique para seleção múltipla | Arrastar para selecionar área")
     
     def set_add_box_mode(self):
         """Ativa o modo de adicionar caixa."""
@@ -1225,14 +1277,12 @@ class VisionMapApp:
                     container.add_box(box)
         
         elif self.mode == "select":
-            # Primeiro, desselecionar tudo
-            if self.selected_box:
-                self.selected_box.deselect()
-                self.selected_box = None
+            # Verificar se Ctrl está pressionado para seleção múltipla
+            ctrl_pressed = (event.state & 0x4) != 0
             
-            if self.selected_container:
-                self.selected_container.deselect()
-                self.selected_container = None
+            # Se não está pressionando Ctrl, limpar seleção anterior
+            if not ctrl_pressed:
+                self.clear_selection()
             
             # Verificar se clicou no manipulador de redimensionamento de algum container
             for container in self.containers:
@@ -1241,26 +1291,71 @@ class VisionMapApp:
                     container.start_resize(event.x, event.y)
                     return
             
+            clicked_on_item = False
+            
             # Verificar se clicou na barra de título de algum container
             for container in self.containers:
                 if container.is_on_title_bar(event.x, event.y):
-                    self.selected_container = container
-                    container.select(event.x, event.y)
+                    if ctrl_pressed and self.is_selected_multiple(container):
+                        # Se Ctrl pressionado e já está selecionado, remover da seleção
+                        self.remove_from_selection(container)
+                    else:
+                        # Adicionar à seleção ou selecionar único
+                        if not ctrl_pressed:
+                            self.selected_container = container
+                            container.select(event.x, event.y)
+                        else:
+                            self.add_to_selection(container)
+                    clicked_on_item = True
                     return
             
             # Verificar se clicou em uma caixa existente
             for box in self.boxes:
                 if box.contains_point(event.x, event.y):
-                    self.selected_box = box
-                    box.select(event.x, event.y)
+                    if ctrl_pressed and self.is_selected_multiple(box):
+                        # Se Ctrl pressionado e já está selecionado, remover da seleção
+                        self.remove_from_selection(box)
+                    else:
+                        # Se clicou em uma caixa que já está na seleção múltipla, preparar movimento
+                        if self.is_selected_multiple(box) and (self.selected_boxes or self.selected_containers):
+                            # Preparar para mover múltiplos elementos
+                            pass  # Não alterar seleção, só preparar movimento
+                        elif not ctrl_pressed:
+                            # Seleção única
+                            self.selected_box = box
+                            box.select(event.x, event.y)
+                        else:
+                            # Adicionar à seleção múltipla
+                            self.add_to_selection(box)
+                    clicked_on_item = True
                     return
             
             # Verificar se clicou em um container
             for container in self.containers:
                 if container.contains_point(event.x, event.y):
-                    self.selected_container = container
-                    container.select(event.x, event.y)
+                    if ctrl_pressed and self.is_selected_multiple(container):
+                        # Se Ctrl pressionado e já está selecionado, remover da seleção
+                        self.remove_from_selection(container)
+                    else:
+                        # Se clicou em um container que já está na seleção múltipla, preparar movimento
+                        if self.is_selected_multiple(container) and (self.selected_boxes or self.selected_containers):
+                            # Preparar para mover múltiplos elementos
+                            pass  # Não alterar seleção, só preparar movimento
+                        elif not ctrl_pressed:
+                            # Seleção única
+                            self.selected_container = container
+                            container.select(event.x, event.y)
+                        else:
+                            # Adicionar à seleção múltipla
+                            self.add_to_selection(container)
+                    clicked_on_item = True
                     return
+            
+            # Se não clicou em nenhum item e não está com Ctrl, iniciar seleção por arrastar
+            if not clicked_on_item and not ctrl_pressed:
+                self.is_selecting = True
+                self.selection_start_x = event.x
+                self.selection_start_y = event.y
         
         elif self.mode == "connect":
             # Primeiro tentar com caixas
@@ -1296,8 +1391,71 @@ class VisionMapApp:
             self.resizing_container.resize(event.x, event.y)
         
         elif self.mode == "select":
-            if self.selected_box:
-                # Mover a caixa selecionada
+            if self.is_selecting:
+                # Atualizar retângulo de seleção
+                if self.selection_rectangle:
+                    self.canvas.delete(self.selection_rectangle)
+                
+                self.selection_rectangle = self.canvas.create_rectangle(
+                    self.selection_start_x, self.selection_start_y,
+                    event.x, event.y,
+                    outline="blue", width=1, dash=(5, 5)
+                )
+                
+            elif self.selected_boxes or self.selected_containers:
+                # Mover múltiplos elementos selecionados
+                if not self.is_moving_multiple:
+                    # Primeira vez que move, calcular offsets e posição de referência
+                    self.is_moving_multiple = True
+                    self.move_start_x = event.x
+                    self.move_start_y = event.y
+                    
+                    # Armazenar posições iniciais de todos os elementos
+                    self.initial_positions = []
+                    
+                    for box in self.selected_boxes:
+                        self.initial_positions.append(('box', box, box.x, box.y))
+                    
+                    for container in self.selected_containers:
+                        self.initial_positions.append(('container', container, container.x, container.y))
+                
+                # Calcular deslocamento total desde o início do movimento
+                dx_total = event.x - self.move_start_x
+                dy_total = event.y - self.move_start_y
+                
+                # Mover todos os elementos com o mesmo deslocamento
+                for item_type, item, initial_x, initial_y in self.initial_positions:
+                    new_x = initial_x + dx_total
+                    new_y = initial_y + dy_total
+                    
+                    if item_type == 'box':
+                        # Calcular deslocamento atual do elemento
+                        current_dx = new_x - item.x
+                        current_dy = new_y - item.y
+                        
+                        # Atualizar posição da caixa
+                        item.x = new_x
+                        item.y = new_y
+                        
+                        # Mover elementos visuais
+                        self.canvas.move(item.rect, current_dx, current_dy)
+                        self.canvas.move(item.text_id, current_dx, current_dy)
+                        
+                        # Se for uma NoteBox, mover elementos adicionais
+                        if isinstance(item, NoteBox):
+                            self.canvas.move(item.toggle_button, current_dx, current_dy)
+                            self.canvas.move(item.toggle_symbol, current_dx, current_dy)
+                        
+                        # Atualizar conexões
+                        for connection in item.connections:
+                            connection.update()
+                            
+                    else:  # container
+                        # Para containers, usar move_to que já cuida das caixas internas
+                        item.move_to(new_x, new_y)
+                
+            elif self.selected_box:
+                # Mover a caixa selecionada (comportamento original)
                 self.selected_box.move(event.x, event.y)
                 
                 # Se a caixa estava em um container e saiu, removê-la
@@ -1333,6 +1491,35 @@ class VisionMapApp:
             # Finalizar o redimensionamento
             self.resizing_container.end_resize()
             self.resizing_container = None
+        
+        elif self.mode == "select" and self.is_selecting:
+            # Finalizar seleção por arrastar
+            if self.selection_rectangle:
+                # Obter elementos dentro do retângulo de seleção
+                selected_items = self.get_selection_bounds(
+                    self.selection_start_x, self.selection_start_y,
+                    event.x, event.y
+                )
+                
+                # Adicionar itens à seleção múltipla
+                for item in selected_items:
+                    self.add_to_selection(item)
+                
+                # Remover retângulo de seleção
+                self.canvas.delete(self.selection_rectangle)
+                self.selection_rectangle = None
+                
+                # Atualizar barra de status
+                self.statusbar.config(text=f"Selecionados: {len(self.selected_boxes)} caixas, {len(self.selected_containers)} containers")
+            
+            self.is_selecting = False
+        
+        elif self.mode == "select" and self.is_moving_multiple:
+            # Finalizar movimento múltiplo
+            self.is_moving_multiple = False
+            self.initial_positions = []
+            self.move_start_x = 0
+            self.move_start_y = 0
         
         elif self.mode == "connect" and self.temp_connection_start:
             # Flag para verificar se uma conexão foi criada
@@ -1389,7 +1576,27 @@ class VisionMapApp:
     
     def delete_selected(self, event=None):
         """Exclui a caixa ou container selecionado."""
-        if self.selected_box:
+        # Deletar múltiplos elementos selecionados
+        if self.selected_boxes or self.selected_containers:
+            # Deletar todas as caixas selecionadas
+            for box in list(self.selected_boxes):  # Usar list() para evitar modificação durante iteração
+                box.delete()
+                if box in self.boxes:
+                    self.boxes.remove(box)
+            
+            # Deletar todos os containers selecionados
+            for container in list(self.selected_containers):
+                container.delete()
+                if container in self.containers:
+                    self.containers.remove(container)
+            
+            # Limpar listas de seleção
+            self.selected_boxes = []
+            self.selected_containers = []
+            
+            self.statusbar.config(text="Elementos selecionados excluídos")
+            
+        elif self.selected_box:
             self.selected_box.delete()
             self.boxes.remove(self.selected_box)
             self.selected_box = None
@@ -1423,7 +1630,31 @@ class VisionMapApp:
     
     def change_box_color(self):
         """Altera a cor da caixa ou container selecionado."""
-        if self.selected_box:
+        if self.selected_boxes or self.selected_containers:
+            # Alterar cor de todos os elementos selecionados
+            if self.selected_boxes:
+                # Pegar a cor da primeira caixa como referência
+                color = colorchooser.askcolor(initialcolor=self.selected_boxes[0].fill_color, title="Escolha a cor")
+                if color[1]:  # Se uma cor foi selecionada
+                    for box in self.selected_boxes:
+                        box.fill_color = color[1]
+                        box.canvas.itemconfig(box.rect, fill=box.fill_color)
+            
+            if self.selected_containers:
+                # Se não houve seleção de caixas, pedir cor para containers
+                if not self.selected_boxes:
+                    color = colorchooser.askcolor(initialcolor=self.selected_containers[0].fill_color, title="Escolha a cor")
+                    if color[1]:  # Se uma cor foi selecionada
+                        for container in self.selected_containers:
+                            container.fill_color = color[1]
+                            container.canvas.itemconfig(container.rect, fill=container.fill_color)
+                else:
+                    # Usar a mesma cor das caixas para os containers
+                    if 'color' in locals() and color[1]:
+                        for container in self.selected_containers:
+                            container.fill_color = color[1]
+                            container.canvas.itemconfig(container.rect, fill=container.fill_color)
+        elif self.selected_box:
             self.selected_box.change_color()
         elif self.selected_container:
             self.selected_container.change_color()
@@ -1432,7 +1663,13 @@ class VisionMapApp:
     
     def bring_selected_to_front(self):
         """Traz o elemento selecionado para a frente."""
-        if self.selected_box:
+        if self.selected_boxes or self.selected_containers:
+            # Trazer todos os elementos selecionados para a frente
+            for box in self.selected_boxes:
+                box.bring_to_front()
+            for container in self.selected_containers:
+                container.bring_to_front()
+        elif self.selected_box:
             self.selected_box.bring_to_front()
         elif self.selected_container:
             self.selected_container.bring_to_front()
@@ -1441,12 +1678,137 @@ class VisionMapApp:
     
     def send_selected_to_back(self):
         """Envia o elemento selecionado para trás."""
-        if self.selected_box:
+        if self.selected_boxes or self.selected_containers:
+            # Enviar todos os elementos selecionados para trás
+            for box in self.selected_boxes:
+                box.send_to_back()
+            for container in self.selected_containers:
+                container.send_to_back()
+        elif self.selected_box:
             self.selected_box.send_to_back()
         elif self.selected_container:
             self.selected_container.send_to_back()
         else:
             messagebox.showinfo("Ordenar Camadas", "Selecione uma caixa ou container primeiro.")
+    
+    def clear_selection(self, event=None):
+        """Limpa toda a seleção."""
+        # Desselecionar elemento único
+        if self.selected_box:
+            self.selected_box.deselect()
+            self.selected_box = None
+        if self.selected_container:
+            self.selected_container.deselect()
+            self.selected_container = None
+        if self.selected_connection:
+            try:
+                self.canvas.itemconfig(self.selected_connection.line, width=2, fill="gray")
+            except tk.TclError:
+                pass
+            self.selected_connection = None
+        
+        # Desselecionar elementos múltiplos
+        for box in self.selected_boxes:
+            box.deselect()
+        for container in self.selected_containers:
+            container.deselect()
+        
+        self.selected_boxes = []
+        self.selected_containers = []
+        
+        # Remover retângulo de seleção se existir
+        if self.selection_rectangle:
+            self.canvas.delete(self.selection_rectangle)
+            self.selection_rectangle = None
+        
+        self.is_selecting = False
+        self.is_moving_multiple = False
+        
+        # Limpar variáveis de movimento múltiplo
+        self.initial_positions = []
+        self.move_start_x = 0
+        self.move_start_y = 0
+    
+    def select_all(self, event=None):
+        """Seleciona todos os elementos."""
+        self.clear_selection()
+        
+        # Selecionar todas as caixas
+        for box in self.boxes:
+            if box not in self.selected_boxes:
+                box.select(box.x, box.y)
+                self.selected_boxes.append(box)
+        
+        # Selecionar todos os containers
+        for container in self.containers:
+            if container not in self.selected_containers:
+                container.select(container.x, container.y)
+                self.selected_containers.append(container)
+        
+        self.statusbar.config(text=f"Selecionados: {len(self.selected_boxes)} caixas, {len(self.selected_containers)} containers")
+    
+    def add_to_selection(self, item):
+        """Adiciona um item à seleção múltipla."""
+        if isinstance(item, Container):
+            if item not in self.selected_containers:
+                item.select(item.x, item.y)
+                self.selected_containers.append(item)
+        else:  # VisionMapBox ou NoteBox
+            if item not in self.selected_boxes:
+                item.select(item.x, item.y)
+                self.selected_boxes.append(item)
+    
+    def remove_from_selection(self, item):
+        """Remove um item da seleção múltipla."""
+        if isinstance(item, Container):
+            if item in self.selected_containers:
+                item.deselect()
+                self.selected_containers.remove(item)
+        else:  # VisionMapBox ou NoteBox
+            if item in self.selected_boxes:
+                item.deselect()
+                self.selected_boxes.remove(item)
+    
+    def is_selected_multiple(self, item):
+        """Verifica se um item está na seleção múltipla."""
+        if isinstance(item, Container):
+            return item in self.selected_containers
+        else:
+            return item in self.selected_boxes
+    
+    def get_selection_bounds(self, x1, y1, x2, y2):
+        """Retorna os elementos dentro do retângulo de seleção."""
+        selected_items = []
+        
+        # Normalizar coordenadas do retângulo
+        min_x, max_x = min(x1, x2), max(x1, x2)
+        min_y, max_y = min(y1, y2), max(y1, y2)
+        
+        # Verificar caixas
+        for box in self.boxes:
+            box_left = box.x - box.width/2
+            box_right = box.x + box.width/2
+            box_top = box.y - box.height/2
+            box_bottom = box.y + box.height/2
+            
+            # Verificar se a caixa está completamente dentro do retângulo
+            if (box_left >= min_x and box_right <= max_x and 
+                box_top >= min_y and box_bottom <= max_y):
+                selected_items.append(box)
+        
+        # Verificar containers
+        for container in self.containers:
+            cont_left = container.x - container.width/2
+            cont_right = container.x + container.width/2
+            cont_top = container.y - container.height/2
+            cont_bottom = container.y + container.height/2
+            
+            # Verificar se o container está completamente dentro do retângulo
+            if (cont_left >= min_x and cont_right <= max_x and 
+                cont_top >= min_y and cont_bottom <= max_y):
+                selected_items.append(container)
+        
+        return selected_items
             
     def on_right_click(self, event):
         """Manipula o evento de clique com o botão direito do mouse."""
@@ -1639,6 +2001,18 @@ class VisionMapApp:
             with open(file_path, 'rb') as f:
                 data = pickle.load(f)
             
+            # Verificar se os dados têm a estrutura esperada
+            if not isinstance(data, dict):
+                raise ValueError("Arquivo com formato inválido")
+                
+            # Garantir que as chaves esperadas existam
+            if 'boxes' not in data:
+                data['boxes'] = []
+            if 'containers' not in data:
+                data['containers'] = []
+            if 'connections' not in data:
+                data['connections'] = []
+            
             # Limpar o canvas atual
             self.canvas.delete("all")
             self.boxes = []
@@ -1682,33 +2056,66 @@ class VisionMapApp:
                     container = containers_map[box_data['container_index']]
                     container.add_box(box)
             
-                # Recriar todas as conexões
+            # Recriar todas as conexões
+            if 'connections' in data:
                 for conn_data in data['connections']:
-                    # Obter o primeiro objeto (caixa ou container)
-                    if 'obj1_type' in conn_data:  # Novo formato
-                        obj1_type = conn_data['obj1_type']
-                        obj1_index = conn_data['obj1_index']
-                        if obj1_type == 'container':
-                            obj1 = self.containers[obj1_index]
-                        else:
-                            obj1 = self.boxes[obj1_index]
+                    try:
+                        # Obter o primeiro objeto (caixa ou container)
+                        if 'obj1_type' in conn_data:  # Novo formato
+                            obj1_type = conn_data['obj1_type']
+                            obj1_index = conn_data['obj1_index']
+                            
+                            # Verificar se o índice é válido
+                            if obj1_type == 'container':
+                                if obj1_index >= len(self.containers):
+                                    print(f"Aviso: Índice de container inválido: {obj1_index}")
+                                    continue
+                                obj1 = self.containers[obj1_index]
+                            else:
+                                if obj1_index >= len(self.boxes):
+                                    print(f"Aviso: Índice de caixa inválido: {obj1_index}")
+                                    continue
+                                obj1 = self.boxes[obj1_index]
+                            
+                            # Obter o segundo objeto (caixa ou container)
+                            obj2_type = conn_data['obj2_type']
+                            obj2_index = conn_data['obj2_index']
+                            
+                            # Verificar se o índice é válido
+                            if obj2_type == 'container':
+                                if obj2_index >= len(self.containers):
+                                    print(f"Aviso: Índice de container inválido: {obj2_index}")
+                                    continue
+                                obj2 = self.containers[obj2_index]
+                            else:
+                                if obj2_index >= len(self.boxes):
+                                    print(f"Aviso: Índice de caixa inválido: {obj2_index}")
+                                    continue
+                                obj2 = self.boxes[obj2_index]
+                        else:  # Formato antigo (compatibilidade)
+                            if 'box1_index' not in conn_data or 'box2_index' not in conn_data:
+                                print("Aviso: Dados de conexão incompletos")
+                                continue
+                            
+                            box1_index = conn_data['box1_index']
+                            box2_index = conn_data['box2_index']
+                            
+                            if box1_index >= len(self.boxes) or box2_index >= len(self.boxes):
+                                print(f"Aviso: Índices de caixa inválidos: {box1_index}, {box2_index}")
+                                continue
+                            
+                            obj1 = self.boxes[box1_index]
+                            obj2 = self.boxes[box2_index]
                         
-                        # Obter o segundo objeto (caixa ou container)
-                        obj2_type = conn_data['obj2_type']
-                        obj2_index = conn_data['obj2_index']
-                        if obj2_type == 'container':
-                            obj2 = self.containers[obj2_index]
-                        else:
-                            obj2 = self.boxes[obj2_index]
-                    else:  # Formato antigo (compatibilidade)
-                        obj1 = self.boxes[conn_data['box1_index']]
-                        obj2 = self.boxes[conn_data['box2_index']]
-                    
-                    # Verificar se há texto de rótulo
-                    label_text = conn_data.get('label_text', "")
-                    
-                    connection = Connection(self.canvas, obj1, obj2, label_text)
-                    self.connections.append(connection)
+                        # Verificar se há texto de rótulo
+                        label_text = conn_data.get('label_text', "")
+                        
+                        connection = Connection(self.canvas, obj1, obj2, label_text)
+                        self.connections.append(connection)
+                        
+                    except (IndexError, KeyError, ValueError) as e:
+                        print(f"Erro ao recriar conexão: {e}")
+                        continue
                     
             self.current_file = file_path
             self.statusbar.config(text=f"VisionMap aberto de: {file_path}")
@@ -2039,9 +2446,16 @@ class VisionMapApp:
             return
         
         try:
+            # Verificar se o arquivo existe e pode ser lido
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"Arquivo não encontrado: {file_path}")
+            
             # Ler o conteúdo do arquivo
             with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
+            
+            if not content.strip():
+                raise ValueError("Arquivo está vazio")
             
             # Extrair o código Mermaid entre ```mermaid e ```
             mermaid_code = ""
@@ -2054,6 +2468,9 @@ class VisionMapApp:
             else:
                 # Se não encontrou os delimitadores, assume que todo o conteúdo é código Mermaid
                 mermaid_code = content
+            
+            if not mermaid_code.strip():
+                raise ValueError("Nenhum código Mermaid válido encontrado no arquivo")
             
             # Limpar o canvas
             self.canvas.delete("all")
@@ -2219,28 +2636,32 @@ class VisionMapApp:
             # Verificar se é uma conexão
             conn_match = re.match(r"(\w+)\s+(-->|---|\.->.|\.--.|\==>|\=\=\=)\s+(\w+)", line)
             if conn_match:
-                node1_id = conn_match.group(1)
-                conn_type = conn_match.group(2)
-                node2_id = conn_match.group(3)
-                
-                # Verificar se os nós existem
-                if node1_id in node_objects and node2_id in node_objects:
-                    obj1 = node_objects[node1_id]
-                    obj2 = node_objects[node2_id]
+                try:
+                    node1_id = conn_match.group(1)
+                    conn_type = conn_match.group(2)
+                    node2_id = conn_match.group(3)
                     
-                    # Verificar se há texto para o rótulo da conexão
-                    label_text = ""
-                    label_match = re.search(r"\|(.+?)\|", line)
-                    if label_match:
-                        label_text = label_match.group(1).strip()
-                    
-                    # Determinar se a conexão tem seta
-                    has_arrow = "-->" in conn_type or ".->" in conn_type or "==>" in conn_type
-                    
-                    # Criar conexão
-                    connection = Connection(self.canvas, obj1, obj2, label_text)
-                    connection.arrow = has_arrow
-                    self.connections.append(connection)
+                    # Verificar se os nós existem
+                    if node1_id in node_objects and node2_id in node_objects:
+                        obj1 = node_objects[node1_id]
+                        obj2 = node_objects[node2_id]
+                        
+                        # Verificar se há texto para o rótulo da conexão
+                        label_text = ""
+                        label_match = re.search(r"\|(.+?)\|", line)
+                        if label_match:
+                            label_text = label_match.group(1).strip()
+                        
+                        # Determinar se a conexão tem seta
+                        has_arrow = "-->" in conn_type or ".->" in conn_type or "==>" in conn_type
+                        
+                        # Criar conexão
+                        connection = Connection(self.canvas, obj1, obj2, label_text)
+                        connection.arrow = has_arrow
+                        self.connections.append(connection)
+                except (IndexError, AttributeError, ValueError) as e:
+                    print(f"Erro ao criar conexão: {e}")
+                    continue
         
         # Posicionar os containers de acordo com seus conteúdos
         for container_id, box_ids in subgraphs.items():
@@ -2293,8 +2714,13 @@ class VisionMapApp:
         """Mostra a caixa de diálogo 'Sobre'."""
         messagebox.showinfo(
             "Sobre VisionMap Creator",
-            "VisionMap Creator v1.1\n\n"
+            "VisionMap Creator v1.2\n\n"
             "Um aplicativo simples para criar mapas visuais.\n\n"
+            "Novas funcionalidades:\n"
+            "• Seleção múltipla (Ctrl+clique)\n"
+            "• Seleção por área (arrastar)\n"
+            "• Movimentação múltipla\n"
+            "• Operações em lote\n\n"
             "Desenvolvido com Python e Tkinter."
         )
 
