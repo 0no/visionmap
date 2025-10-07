@@ -202,6 +202,12 @@ class Container:
         # Lista de caixas dentro deste container
         self.boxes = []
         
+        # Lista de containers filhos dentro deste container
+        self.child_containers = []
+        
+        # Referência ao container pai, se estiver dentro de outro container
+        self.parent_container = None
+        
         # Redimensionamento
         self.resize_handle = canvas.create_rectangle(
             x + width/2 - 10, y + height/2 - 10,
@@ -267,9 +273,61 @@ class Container:
             for connection in box.connections:
                 connection.update()
         
+        # Mover todos os containers filhos
+        if hasattr(self, 'child_containers') and self.child_containers:  # Verifica se o atributo existe e não está vazio
+            # Criar um conjunto para rastrear os containers já processados para evitar loops infinitos
+            processed = set()
+            processed.add(self)  # Adiciona a si mesmo ao conjunto de processados
+            
+            for child_container in list(self.child_containers):  # Usamos uma cópia da lista para evitar problemas durante a iteração
+                # Verificações de segurança para evitar recursão infinita
+                if child_container is None or child_container == self or id(child_container) in processed:
+                    continue
+                    
+                # Marcar este container como processado
+                processed.add(id(child_container))
+                
+                # Usar move_to para mover recursivamente containers filhos
+                new_x = child_container.x + dx
+                new_y = child_container.y + dy
+                
+                # Mover elementos visuais do container filho diretamente, sem recursão
+                child_container.canvas.move(child_container.rect, dx, dy)
+                child_container.canvas.move(child_container.title_bar, dx, dy)
+                child_container.canvas.move(child_container.text_id, dx, dy)
+                child_container.canvas.move(child_container.resize_handle, dx, dy)
+                
+                # Atualizar coordenadas
+                child_container.x = new_x
+                child_container.y = new_y
+                
+                # Mover as caixas dentro do container filho
+                for box in child_container.boxes:
+                    box.x += dx
+                    box.y += dy
+                    child_container.canvas.move(box.rect, dx, dy)
+                    child_container.canvas.move(box.text_id, dx, dy)
+                    
+                    # Se for uma caixa de anotação, mover os elementos adicionais
+                    if isinstance(box, NoteBox):
+                        child_container.canvas.move(box.toggle_button, dx, dy)
+                        child_container.canvas.move(box.toggle_symbol, dx, dy)
+                        
+                    # Atualizar conexões da caixa
+                    for connection in box.connections:
+                        connection.update()
+                
+                # Atualizar as conexões do container filho
+                if hasattr(child_container, 'connections'):
+                    for connection in child_container.connections:
+                        connection.update()
+        
         # Atualizar todas as conexões do próprio container
         for connection in self.connections:
             connection.update()
+        
+        # Verificar se há conexões entre containers filhos que também precisam ser atualizadas
+        self.update_all_connections()
     
     def resize_to(self, width, height):
         """Redimensiona o container para as dimensões especificadas."""
@@ -380,38 +438,35 @@ class Container:
         dx = x - self.offset_x - self.x
         dy = y - self.offset_y - self.y
         
-        # Mover os elementos visuais do container
-        self.canvas.move(self.rect, dx, dy)
-        self.canvas.move(self.title_bar, dx, dy)
-        self.canvas.move(self.text_id, dx, dy)
-        self.canvas.move(self.resize_handle, dx, dy)
+        # Calcular a nova posição
+        new_x = self.x + dx
+        new_y = self.y + dy
         
-        # Atualizar as coordenadas
-        self.x += dx
-        self.y += dy
-        
-        # Mover todas as caixas dentro do container
-        for box in self.boxes:
-            # Atualizar as coordenadas da caixa
-            box.x += dx
-            box.y += dy
-            
-            # Mover os elementos visuais da caixa
-            self.canvas.move(box.rect, dx, dy)
-            self.canvas.move(box.text_id, dx, dy)
-            
-            # Se for uma caixa de anotação, mover os elementos adicionais
-            if isinstance(box, NoteBox):
-                self.canvas.move(box.toggle_button, dx, dy)
-                self.canvas.move(box.toggle_symbol, dx, dy)
-            
-            # Atualizar todas as conexões da caixa
-            for connection in box.connections:
-                connection.update()
-        
-        # Atualizar todas as conexões do próprio container
+        # Usar o método move_to que já inclui o movimento de containers filhos
+        self.move_to(new_x, new_y)
+    
+    def update_all_connections(self):
+        """Atualiza todas as conexões relacionadas a este container e seus filhos."""
+        # Atualizar as conexões diretas deste container
         for connection in self.connections:
             connection.update()
+        
+        # Atualizar recursivamente para todos os containers filhos
+        if hasattr(self, 'child_containers') and self.child_containers:
+            processed = set([id(self)])  # Evitar loops infinitos
+            
+            for child in self.child_containers:
+                if child is not None and id(child) not in processed:
+                    processed.add(id(child))
+                    
+                    # Atualizar conexões deste container filho
+                    if hasattr(child, 'connections'):
+                        for connection in child.connections:
+                            connection.update()
+                            
+                    # Procurar recursivamente em níveis mais profundos
+                    if hasattr(child, 'update_all_connections'):
+                        child.update_all_connections()
     
     def add_box(self, box):
         """Adiciona uma caixa ao container."""
@@ -431,6 +486,89 @@ class Container:
                 box.x + box.width/2 <= self.x + self.width/2 and
                 box.y - box.height/2 >= self.y - self.height/2 + self.title_height and
                 box.y + box.height/2 <= self.y + self.height/2)
+                
+    def contains_container(self, container):
+        """Verifica se um container está totalmente dentro deste container."""
+        if container == self:  # Um container não pode conter a si mesmo
+            return False
+            
+        # Verificação mais tolerante - considera que o container está dentro
+        # se ao menos 75% da sua área estiver dentro do container pai
+        center_inside = (container.x >= self.x - self.width/2 and
+                         container.x <= self.x + self.width/2 and
+                         container.y >= self.y - self.height/2 + self.title_height and
+                         container.y <= self.y + self.height/2)
+        
+        fully_inside = (container.x - container.width/2 >= self.x - self.width/2 and
+                        container.x + container.width/2 <= self.x + self.width/2 and
+                        container.y - container.height/2 >= self.y - self.height/2 + self.title_height and
+                        container.y + container.height/2 <= self.y + self.height/2)
+        
+        # Para containers pequenos dentro de containers grandes, usamos verificação completa
+        if container.width < self.width*0.75 and container.height < self.height*0.75:
+            return fully_inside
+            
+        # Para containers de tamanho semelhante, apenas verificamos se o centro está dentro
+        return center_inside
+                
+    def add_child_container(self, container):
+        """Adiciona um container filho a este container."""
+        # Garante que o atributo child_containers existe
+        if not hasattr(self, 'child_containers'):
+            self.child_containers = []
+            
+        # Verificações de segurança
+        # Evita adicionar o mesmo container ou criar uma recursão
+        if container in self.child_containers or container == self:
+            return False
+            
+        # Verificar se essa operação criaria um ciclo
+        # (exemplo: se o container que estamos adicionando é pai deste container)
+        current = self
+        visited = set()
+        
+        while current and hasattr(current, 'parent_container'):
+            if current == container:
+                # Isso criaria um ciclo, então não permitimos
+                print(f"AVISO: Tentativa de criar ciclo de containers detectada! {container.title} -> {self.title}")
+                return False
+                
+            # Verificar se já visitamos este container (ciclo existente)
+            if current in visited:
+                break
+                
+            visited.add(current)
+            current = current.parent_container
+        
+        # A operação é segura, podemos prosseguir
+        # Verifica se o container já tem um pai
+        if hasattr(container, 'parent_container') and container.parent_container:
+            # Remove do pai atual antes de adicionar ao novo
+            container.parent_container.remove_child_container(container)
+            
+        # Adiciona à lista de containers filhos
+        self.child_containers.append(container)
+        
+        # Define a referência ao container pai
+        container.parent_container = self
+        
+        # Debug na console
+        print(f"Container '{container.title}' adicionado como filho de '{self.title}'")
+        return True
+            
+    def remove_child_container(self, container):
+        """Remove um container filho deste container."""
+        # Garante que o atributo child_containers existe
+        if not hasattr(self, 'child_containers'):
+            self.child_containers = []
+            return
+            
+        if container in self.child_containers:
+            self.child_containers.remove(container)
+            container.parent_container = None  # Remover a referência ao container pai
+            
+            # Debug na console
+            print(f"Container '{container.title}' removido como filho de '{self.title}'")
     
     def edit_title(self):
         """Edita o título do container."""
@@ -483,8 +621,17 @@ class Container:
         for box in list(self.boxes):  # Usar uma cópia para evitar problemas durante a iteração
             box.container = None
         
-        # Limpar a lista de caixas
+        # Remover a referência de container pai de todos os containers filhos
+        for child_container in list(self.child_containers):
+            child_container.parent_container = None
+        
+        # Se este container tem um pai, removê-lo da lista de filhos do pai
+        if self.parent_container:
+            self.parent_container.remove_child_container(self)
+        
+        # Limpar a lista de caixas e containers filhos
         self.boxes.clear()
+        self.child_containers.clear()
         
         # Remover os elementos visuais do container
         self.canvas.delete(self.rect)
@@ -502,7 +649,8 @@ class Container:
             'title': self.title,
             'fill_color': self.fill_color,
             'outline_color': self.outline_color,
-            'type': 'container'
+            'type': 'container',
+            'parent_container_id': id(self.parent_container) if self.parent_container else None
         }
     
     @classmethod
@@ -517,6 +665,8 @@ class Container:
             state.get('fill_color', "#F0F0F0"),
             state.get('outline_color', "#888888")
         )
+        
+        # A vinculação ao container pai será feita posteriormente pelo método open_from_file
         
         return container
 
@@ -981,6 +1131,12 @@ class VisionMapApp:
         self.root.title("VisionMap Creator")
         self.root.geometry("1000x700")
         
+        # Configurar eventos de redimensionamento
+        self.root.bind("<Configure>", self.on_window_resize)
+        
+        # Agendar verificação periódica de relacionamentos entre containers
+        self.root.after(1000, self.check_container_relationships)
+        
         # Definir o ícone da aplicação
         try:
             # Carrega a imagem usando PIL
@@ -1017,9 +1173,34 @@ class VisionMapApp:
         # Botões da barra de ferramentas
         self.create_toolbar()
         
-        # Criar o canvas
-        self.canvas = tk.Canvas(self.canvas_frame, bg="white")
+        # Criar um frame para o canvas com barras de rolagem
+        self.canvas_container = tk.Frame(self.canvas_frame)
+        self.canvas_container.pack(fill=tk.BOTH, expand=True)
+        
+        # Definir o tamanho inicial do canvas (pode ser maior que a janela visível)
+        self.canvas_width = 3000  # Tamanho inicial horizontal do canvas
+        self.canvas_height = 2000  # Tamanho inicial vertical do canvas
+        
+        # Criar barras de rolagem
+        self.h_scrollbar = tk.Scrollbar(self.canvas_container, orient=tk.HORIZONTAL)
+        self.h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        self.v_scrollbar = tk.Scrollbar(self.canvas_container)
+        self.v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Criar o canvas com barras de rolagem
+        self.canvas = tk.Canvas(self.canvas_container, bg="white",
+                               scrollregion=(0, 0, self.canvas_width, self.canvas_height),
+                               xscrollcommand=self.h_scrollbar.set,
+                               yscrollcommand=self.v_scrollbar.set)
         self.canvas.pack(fill=tk.BOTH, expand=True)
+        
+        # Configurar barras de rolagem para controlar o canvas
+        self.h_scrollbar.config(command=self.canvas.xview)
+        self.v_scrollbar.config(command=self.canvas.yview)
+        
+        # Permitir zoom com a roda do mouse
+        self.canvas.bind("<Control-MouseWheel>", self.on_mouse_wheel)
         
         # Barra de status
         self.statusbar = tk.Label(self.main_frame, text="Pronto", bd=1, relief=tk.SUNKEN, anchor=tk.W)
@@ -1037,6 +1218,11 @@ class VisionMapApp:
         self.selected_connection = None
         self.temp_connection_start = None
         self.resizing_container = None
+        
+        # Variáveis para controle de navegação do canvas
+        self.panning = False
+        self.pan_start_x = 0
+        self.pan_start_y = 0
         
         # Seleção múltipla
         self.selected_boxes = []  # Lista de caixas selecionadas
@@ -1058,6 +1244,23 @@ class VisionMapApp:
         self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
         self.canvas.bind("<Double-Button-1>", self.on_double_click)
         self.canvas.bind("<Button-3>", self.on_right_click)  # Botão direito para menu de contexto
+        
+        # Eventos para navegação por arrastar (pan)
+        self.canvas.bind("<Button-2>", self.start_pan)  # Botão do meio do mouse para iniciar pan
+        self.canvas.bind("<B2-Motion>", self.pan_canvas)  # Arrastar com botão do meio para mover o canvas
+        self.canvas.bind("<ButtonRelease-2>", self.stop_pan)  # Soltar botão do meio para parar pan
+        
+        # Permitir pan com Ctrl+arrastar com botão esquerdo (alternativa para quem não tem botão do meio)
+        self.canvas.bind("<Control-Button-1>", self.start_pan)
+        self.canvas.bind("<Control-B1-Motion>", self.pan_canvas)
+        self.canvas.bind("<Control-ButtonRelease-1>", self.stop_pan)
+        
+        # Suporte para rolagem com o mouse (Windows e Linux)
+        self.canvas.bind("<MouseWheel>", self.on_mouse_wheel)  # Windows
+        self.canvas.bind("<Button-4>", self.on_mouse_wheel)  # Linux (rolar para cima)
+        self.canvas.bind("<Button-5>", self.on_mouse_wheel)  # Linux (rolar para baixo)
+        self.canvas.bind("<Control-Button-4>", self.on_mouse_wheel)  # Linux (rolar horizontalmente para cima)
+        self.canvas.bind("<Control-Button-5>", self.on_mouse_wheel)  # Linux (rolar horizontalmente para baixo)
         
         # Nome do arquivo atual
         self.current_file = None
@@ -1141,6 +1344,16 @@ class VisionMapApp:
         edit_menu.add_command(label="Editar Item", command=self.edit_selected)
         edit_menu.add_command(label="Trocar Cor (F)", command=self.change_box_color)
         edit_menu.add_command(label="Excluir Item", command=self.delete_selected, accelerator="Delete")
+        
+        # Menu Canvas
+        canvas_menu = tk.Menu(menubar, tearoff=0)
+        canvas_menu.add_command(label="Aumentar Tamanho do Canvas", command=lambda: self.resize_canvas(1.5))
+        canvas_menu.add_command(label="Diminuir Tamanho do Canvas", command=lambda: self.resize_canvas(0.75))
+        canvas_menu.add_command(label="Redefinir Tamanho do Canvas", command=lambda: self.resize_canvas(1.0, reset=True))
+        canvas_menu.add_separator()
+        canvas_menu.add_command(label="Centralizar Visão", command=self.center_canvas_view)
+        canvas_menu.add_command(label="Ajustar Canvas ao Conteúdo", command=self.fit_canvas_to_content)
+        menubar.add_cascade(label="Canvas", menu=canvas_menu)
         edit_menu.add_separator()
         edit_menu.add_command(label="Trazer para Frente (G)", command=self.bring_selected_to_front)
         edit_menu.add_command(label="Enviar para Trás (H)", command=self.send_selected_to_back)
@@ -1198,6 +1411,16 @@ class VisionMapApp:
         self.clear_selection_button = tk.Button(self.toolbar, text="Limpar Sel. (Esc)", 
                                                command=self.clear_selection)
         self.clear_selection_button.pack(side=tk.LEFT, padx=5, pady=5)
+        
+        # Separador para ferramentas de debug
+        debug_separator = tk.Frame(self.toolbar, width=2, bg="gray")
+        debug_separator.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        
+        # # Botão para debug de containers
+        # self.debug_containers_button = tk.Button(self.toolbar, text="Debug Containers", 
+        #                                       command=self.show_container_debug,
+        #                                       bg="#FFE0E0")  # Cor de fundo diferente para destacar
+        # self.debug_containers_button.pack(side=tk.LEFT, padx=5, pady=5)
     
     def reset_toolbar_buttons(self):
         """Reseta todos os botões da barra de ferramentas."""
@@ -1241,6 +1464,46 @@ class VisionMapApp:
         self.reset_toolbar_buttons()
         self.connect_button.config(relief=tk.SUNKEN)
         self.statusbar.config(text="Modo: Conectar caixas")
+    
+    def create_container_at(self, x, y, width, height, title="Novo Container"):
+        """Cria um container nas coordenadas e dimensões especificadas."""
+        # Criar um container diretamente (sem usar o modo de interface)
+        container = Container(
+            self.canvas, 
+            x, y, 
+            title=title, 
+            width=width, 
+            height=height
+        )
+        
+        # Adicionar o container à lista de containers
+        self.containers.append(container)
+        
+        # Inicializar atributos necessários para hierarquia
+        if not hasattr(container, 'child_containers'):
+            container.child_containers = []
+        container.parent_container = None
+        
+        # Retornar o container criado para permitir manipulação adicional
+        return container
+        
+    def create_box_at(self, x, y, text="Nova Caixa", width=100, height=50, fill_color="lightblue"):
+        """Cria uma caixa nas coordenadas especificadas."""
+        # Criar uma caixa diretamente (sem usar o modo de interface)
+        box = VisionMapBox(
+            self.canvas, 
+            x, y, 
+            text=text, 
+            width=width, 
+            height=height, 
+            fill_color=fill_color
+        )
+        
+        # Adicionar a caixa à lista de caixas
+        self.boxes.append(box)
+        
+        # Retornar a caixa criada para permitir manipulação adicional
+        return box
     
     def on_canvas_click(self, event):
         """Manipula o evento de clique no canvas."""
@@ -1474,8 +1737,47 @@ class VisionMapApp:
                         break
             
             elif self.selected_container:
+                # Verificar se o container selecionado já tem atributos necessários
+                if not hasattr(self.selected_container, 'child_containers'):
+                    self.selected_container.child_containers = []
+                if not hasattr(self.selected_container, 'parent_container'):
+                    self.selected_container.parent_container = None
+                
+                # Salvar a posição atual antes de mover
+                old_x = self.selected_container.x
+                old_y = self.selected_container.y
+                
                 # Mover o container selecionado e todas as caixas dentro dele
                 self.selected_container.move(event.x, event.y)
+                
+                # Se o container estava em um container pai e saiu, removê-lo
+                if hasattr(self.selected_container, 'parent_container') and self.selected_container.parent_container:
+                    old_parent = self.selected_container.parent_container
+                    if not old_parent.contains_container(self.selected_container):
+                        # Salvar informações do container pai antes de removê-lo
+                        parent_title = old_parent.title
+                        old_parent.remove_child_container(self.selected_container)
+                        self.statusbar.config(text=f"Container '{self.selected_container.title}' removido de '{parent_title}'")
+                
+                # Verificar se o container entrou em algum outro container
+                for container in self.containers:
+                    # Garantir que o container de destino tenha os atributos necessários
+                    if not hasattr(container, 'child_containers'):
+                        container.child_containers = []
+                        
+                    # Verificar se o container selecionado está dentro de outro container
+                    if (container != self.selected_container and 
+                        container.contains_container(self.selected_container) and 
+                        self.selected_container.parent_container != container):
+                        
+                        # Se já estava em outro container, remover
+                        if self.selected_container.parent_container:
+                            self.selected_container.parent_container.remove_child_container(self.selected_container)
+                        
+                        # Adicionar ao novo container
+                        container.add_child_container(self.selected_container)
+                        self.statusbar.config(text=f"Container '{self.selected_container.title}' adicionado a '{container.title}'")
+                        break
         
         elif self.mode == "connect" and self.temp_connection_start:
             # Atualizar a linha temporária
@@ -1892,6 +2194,85 @@ class VisionMapApp:
                     container.add_box(box)
                     break
     
+    def check_container_relationships(self):
+        """Verifica e atualiza as relações entre containers."""
+        # Limpar todas as relações de containers filhos
+        for container in self.containers:
+            if hasattr(container, 'child_containers'):
+                container.child_containers.clear()
+            else:
+                container.child_containers = []
+            container.parent_container = None
+        
+        # Criar um conjunto para manter o controle de quais containers já têm pais
+        # para evitar relacionamentos circulares
+        has_parent = set()
+        
+        # Recalcular as relações com base na posição atual
+        # Começamos com os maiores containers (possíveis pais) primeiro
+        sorted_containers = sorted(self.containers, key=lambda c: c.width * c.height, reverse=True)
+        
+        for container in self.containers:
+            # Pular se já tem um pai
+            if container in has_parent:
+                continue
+                
+            # Verificar cada container como possível filho
+            for potential_parent in sorted_containers:
+                # Evitar auto-referência e ciclos
+                if (container != potential_parent and 
+                    potential_parent.contains_container(container) and
+                    # Garantir que não teremos ciclos nos relacionamentos
+                    not self._would_create_cycle(container, potential_parent)):
+                    
+                    potential_parent.add_child_container(container)
+                    has_parent.add(container)
+                    # Uma vez encontrado um pai, não procuramos mais (evita containers com múltiplos pais)
+                    break
+    
+    def _would_create_cycle(self, child, potential_parent):
+        """Verifica se adicionar o container filho ao container pai criaria um ciclo."""
+        # Se o filho é igual ao potencial pai, temos um ciclo
+        if child == potential_parent:
+            return True
+            
+        # Se o potencial pai não tem atributo parent_container, não há ciclo
+        if not hasattr(potential_parent, 'parent_container') or potential_parent.parent_container is None:
+            return False
+            
+        # Verifica recursivamente se algum dos ancestrais do potencial pai é igual ao filho
+        current = potential_parent.parent_container
+        visited = set([potential_parent])
+        
+        while current:
+            if current == child:
+                return True
+                
+            if current in visited:
+                # Detectou ciclo existente (não relacionado ao novo relacionamento)
+                return False
+                
+            visited.add(current)
+            
+            if not hasattr(current, 'parent_container'):
+                break
+                
+            current = current.parent_container
+            
+        return False
+        
+        # Verificar todas as caixas também
+        self.check_boxes_in_containers()
+        
+        # Agendar a próxima verificação (menos frequente para melhorar performance)
+        self.root.after(5000, self.check_container_relationships)
+        
+        # Mensagem de debug na barra de status para verificar se as relações estão sendo estabelecidas
+        if self.containers:
+            child_count = sum(len(c.child_containers) if hasattr(c, 'child_containers') else 0 for c in self.containers)
+            if child_count > 0:
+                self.statusbar.config(text=f"Detectados {child_count} containers aninhados")
+    
     def new_visionmap(self, event=None):
         """Cria um novo visionmap."""
         if (self.boxes or self.containers) and messagebox.askyesno("Novo VisionMap", 
@@ -1944,9 +2325,16 @@ class VisionMapApp:
         box_id_to_index = {}
         container_id_to_index = {}
         
+        # Atualizar as relações entre containers antes de salvar
+        self.check_container_relationships()
+        
         # Salvar todos os containers
         for i, container in enumerate(self.containers):
-            data['containers'].append(container.get_state())
+            container_data = container.get_state()
+            # Adicionar índice do container pai, se houver
+            if container.parent_container:
+                container_data['parent_container_index'] = container_id_to_index.get(id(container.parent_container))
+            data['containers'].append(container_data)
             container_id_to_index[id(container)] = i
         
         # Salvar todas as caixas
@@ -2021,18 +2409,30 @@ class VisionMapApp:
             
             # Recriar todos os containers primeiro
             containers_map = {}  # Mapear índices para objetos de container
+            container_id_map = {}  # Mapear IDs originais para novos objetos de container
+            parent_container_map = {}  # Mapear IDs de containers para seus containers pais
+            
             if 'containers' in data:
                 for i, container_data in enumerate(data['containers']):
                     container = Container(
                         self.canvas,
                         container_data['x'], container_data['y'],
-                        container_data.get('width', 300), container_data.get('height', 200),
+                        container_data.get('width', 300), 
+                        container_data.get('height', 200),
                         container_data.get('title', 'Novo Container'),
                         container_data.get('fill_color', "#F0F0F0"),
                         container_data.get('outline_color', "#888888")
                     )
                     self.containers.append(container)
                     containers_map[i] = container
+                    
+                    # Armazenar o índice do container pai se houver
+                    if 'parent_container_index' in container_data and container_data['parent_container_index'] is not None:
+                        parent_index = container_data['parent_container_index']
+                        # Relacionar posteriormente quando todos os containers forem criados
+                        if parent_index in containers_map:
+                            parent = containers_map[parent_index]
+                            parent.add_child_container(container)
             
             # Recriar todas as caixas
             for box_data in data['boxes']:
@@ -2117,6 +2517,21 @@ class VisionMapApp:
                         print(f"Erro ao recriar conexão: {e}")
                         continue
                     
+            # Estabelecer relações entre containers depois que todos foram criados
+            # Verificar todos os containers para determinar relações pai-filho com base na posição
+            # Começamos com os maiores containers para garantir hierarquia correta
+            sorted_containers = sorted(self.containers, key=lambda c: c.width * c.height, reverse=True)
+            
+            for container in sorted_containers:
+                # Se já tem um pai, não buscar outro
+                if container.parent_container:
+                    continue
+                    
+                for potential_parent in sorted_containers:
+                    if container != potential_parent and potential_parent.contains_container(container):
+                        potential_parent.add_child_container(container)
+                        break
+            
             self.current_file = file_path
             self.statusbar.config(text=f"VisionMap aberto de: {file_path}")
             
@@ -2425,6 +2840,132 @@ class VisionMapApp:
         except Exception as e:
             messagebox.showerror("Erro ao Exportar", f"Não foi possível capturar a tela: {str(e)}")
     
+    def on_window_resize(self, event):
+        """Atualiza a região de rolagem do canvas quando a janela é redimensionada."""
+        # Verificar se o evento está relacionado à janela principal e não a outros widgets
+        if event.widget == self.root:
+            # Manter a região de rolagem do canvas pelo menos do tamanho atual
+            if hasattr(self, 'canvas_width') and hasattr(self, 'canvas_height'):
+                self.canvas.config(scrollregion=(0, 0, self.canvas_width, self.canvas_height))
+    
+    def on_mouse_wheel(self, event):
+        """Permite usar a roda do mouse para mover o canvas verticalmente ou horizontalmente com Ctrl."""
+        # Determinar a direção do movimento
+        if event.num == 4:
+            # Linux: Button-4 é rolagem para cima
+            direction = -1
+        elif event.num == 5:
+            # Linux: Button-5 é rolagem para baixo
+            direction = 1
+        else:
+            # Windows/macOS: Usar delta da roda do mouse
+            direction = -1 if event.delta > 0 else 1
+        
+        # Verifica se a tecla Ctrl está pressionada
+        # No Windows: event.state & 4 (valor binário para Ctrl)
+        # No Linux: event.state & 0x4
+        ctrl_pressed = (event.state & 4) > 0 or (hasattr(event, 'keysym') and event.keysym == 'Control_L')
+        
+        if ctrl_pressed or hasattr(event, 'widget') and 'Control' in str(event.type):
+            # Rolagem horizontal
+            self.canvas.xview_scroll(direction, "units")
+        else:
+            # Rolagem vertical
+            self.canvas.yview_scroll(direction, "units")
+    
+    def resize_canvas(self, scale_factor, reset=False):
+        """Redimensiona o canvas pelo fator de escala fornecido."""
+        if reset:
+            # Redefine para o tamanho padrão
+            self.canvas_width = 3000
+            self.canvas_height = 2000
+        else:
+            # Calcula novo tamanho com base no fator de escala
+            self.canvas_width = int(self.canvas_width * scale_factor)
+            self.canvas_height = int(self.canvas_height * scale_factor)
+        
+        # Atualizar a região de rolagem do canvas
+        self.canvas.config(scrollregion=(0, 0, self.canvas_width, self.canvas_height))
+        
+        # Atualizar a barra de status
+        self.statusbar.config(text=f"Tamanho do canvas ajustado para {self.canvas_width}x{self.canvas_height}")
+    
+    def center_canvas_view(self):
+        """Centraliza a visão do canvas."""
+        # Obter as dimensões da região de rolagem
+        x1, y1, x2, y2 = self.canvas.cget("scrollregion").split()
+        width = float(x2) - float(x1)
+        height = float(y2) - float(y1)
+        
+        # Obter o centro da região de rolagem
+        x_center = width / 2
+        y_center = height / 2
+        
+        # Mover a visão para o centro
+        self.canvas.xview_moveto((x_center - self.canvas.winfo_width() / 2) / width)
+        self.canvas.yview_moveto((y_center - self.canvas.winfo_height() / 2) / height)
+        
+        self.statusbar.config(text="Visão centralizada")
+    
+    def fit_canvas_to_content(self):
+        """Ajusta o tamanho do canvas para acomodar todo o conteúdo atual."""
+        if not (self.boxes or self.containers):
+            messagebox.showinfo("Ajustar Canvas", "Não há conteúdo para ajustar o canvas.")
+            return
+            
+        # Encontrar os limites do conteúdo
+        all_items = self.boxes + self.containers
+        x_min = min([item.x - item.width/2 for item in all_items])
+        y_min = min([item.y - item.height/2 for item in all_items])
+        x_max = max([item.x + item.width/2 for item in all_items])
+        y_max = max([item.y + item.height/2 for item in all_items])
+        
+        # Adicionar margem
+        margin = 500  # Margem extra para facilitar edição
+        x_min = max(0, x_min - margin)
+        y_min = max(0, y_min - margin)
+        x_max += margin
+        y_max += margin
+        
+        # Garantir tamanho mínimo
+        self.canvas_width = max(3000, int(x_max))
+        self.canvas_height = max(2000, int(y_max))
+        
+        # Atualizar a região de rolagem
+        self.canvas.config(scrollregion=(0, 0, self.canvas_width, self.canvas_height))
+        
+        self.statusbar.config(text=f"Canvas ajustado para acomodar todo o conteúdo: {self.canvas_width}x{self.canvas_height}")
+    
+    def start_pan(self, event):
+        """Inicia o modo de navegação por arrasto."""
+        # Mudar o cursor para indicar movimento
+        self.canvas.config(cursor="fleur")  # Cursor de movimento
+        self.panning = True
+        self.pan_start_x = event.x
+        self.pan_start_y = event.y
+    
+    def pan_canvas(self, event):
+        """Move o canvas quando o usuário arrasta com o botão do meio do mouse."""
+        if not self.panning:
+            return
+            
+        # Calcular a diferença de posição
+        dx = self.pan_start_x - event.x
+        dy = self.pan_start_y - event.y
+        
+        # Mover a visualização do canvas
+        self.canvas.xview_scroll(dx, "units")
+        self.canvas.yview_scroll(dy, "units")
+        
+        # Atualizar posição inicial para o próximo movimento
+        self.pan_start_x = event.x
+        self.pan_start_y = event.y
+    
+    def stop_pan(self, event):
+        """Para o modo de navegação por arrasto."""
+        self.panning = False
+        self.canvas.config(cursor="")  # Restaurar cursor padrão
+        
     def import_from_mermaid(self):
         """Importa um diagrama Mermaid para o visionmap."""
         if (self.boxes or self.containers) and messagebox.askyesno(
@@ -2710,6 +3251,45 @@ class VisionMapApp:
                     current_x = 100
                     current_y += 150
 
+    def debug_containers(self):
+        """Método para depuração de containers aninhados."""
+        # Forçar uma verificação dos relacionamentos
+        self.check_container_relationships()
+        
+        # Verificar todos os containers
+        debug_info = "Informações de containers:\n\n"
+        for i, container in enumerate(self.containers):
+            # Garantir que os atributos existam
+            if not hasattr(container, 'child_containers'):
+                container.child_containers = []
+            if not hasattr(container, 'parent_container'):
+                container.parent_container = None
+            
+            # Contar filhos
+            child_containers = len(container.child_containers)
+            child_boxes = len(container.boxes)
+            
+            # Adicionar destaque visual temporário
+            original_outline = container.outline_color
+            self.canvas.itemconfig(container.rect, outline="red", width=3)
+            self.canvas.update()
+            
+            debug_info += f"{i+1}. '{container.title}' ({container.x}, {container.y}):\n"
+            debug_info += f"   - {child_containers} containers filhos\n"
+            debug_info += f"   - {child_boxes} caixas\n"
+            
+            if container.parent_container:
+                debug_info += f"   - Dentro de: '{container.parent_container.title}'\n"
+            else:
+                debug_info += f"   - Container de nível superior\n"
+            
+            # Restaurar aparência após 500ms
+            self.root.after(500, lambda c=container, o=original_outline: 
+                self.canvas.itemconfig(c.rect, outline=o, width=2))
+        
+        # Mostrar informações
+        messagebox.showinfo("Debug de Containers", debug_info)
+
     def show_about(self):
         """Mostra a caixa de diálogo 'Sobre'."""
         messagebox.showinfo(
@@ -2720,7 +3300,8 @@ class VisionMapApp:
             "• Seleção múltipla (Ctrl+clique)\n"
             "• Seleção por área (arrastar)\n"
             "• Movimentação múltipla\n"
-            "• Operações em lote\n\n"
+            "• Operações em lote\n"
+            "• Containers aninhados\n\n"
             "Desenvolvido com Python e Tkinter."
         )
 

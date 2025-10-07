@@ -1,6 +1,8 @@
 # VisionMap Creator
 
-Uma aplicação simples para criar mapas visuais usando Python e Tkinter.
+Uma aplicação simples para4. Operações básicas:
+   - Clique duplo em uma caixa para editar seu texto ou na barra de título de um container para editar seu título
+   - Use o menu Canvas para ajustar o tamanho da área de desenho, centralizar a visão ou ajustar o canvas ao conteúdoriar mapas visuais usando Python e Tkinter.
 
 ## Funcionalidades
 
@@ -18,6 +20,8 @@ Uma aplicação simples para criar mapas visuais usando Python e Tkinter.
 - Salvar e carregar visionmaps
 - Exportar o visionmap como imagem
 - Exportar o visionmap como código Mermaid para integração com documentos Markdown
+- Canvas redimensionável com barras de rolagem para diagramas grandes
+- Navegação intuitiva usando mouse para mover e visualizar o canvas
 
 ## Requisitos
 
@@ -81,6 +85,12 @@ O aplicativo usa o arquivo `logo.png` na pasta raiz como ícone da janela princi
 - `G`: Trazer para Frente
 - `H`: Enviar para Trás
 - `Delete`: Excluir item selecionado
+
+### Navegação e Canvas
+- `Botão do meio do mouse`: Arrastar para mover a visão do canvas
+- `Ctrl + Arrastar`: Arrastar para mover a visão do canvas (alternativa)
+- `Roda do mouse`: Rolar verticalmente
+- `Ctrl + Roda do mouse`: Rolar horizontalmente
 
 ## Formatos de arquivo
 
