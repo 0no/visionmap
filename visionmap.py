@@ -1250,10 +1250,10 @@ class VisionMapApp:
         self.canvas.bind("<B2-Motion>", self.pan_canvas)  # Arrastar com botão do meio para mover o canvas
         self.canvas.bind("<ButtonRelease-2>", self.stop_pan)  # Soltar botão do meio para parar pan
         
-        # Permitir pan com Ctrl+arrastar com botão esquerdo (alternativa para quem não tem botão do meio)
-        self.canvas.bind("<Control-Button-1>", self.start_pan)
-        self.canvas.bind("<Control-B1-Motion>", self.pan_canvas)
-        self.canvas.bind("<Control-ButtonRelease-1>", self.stop_pan)
+        # Permitir pan com Shift+arrastar com botão esquerdo (alternativa para quem não tem botão do meio)
+        self.canvas.bind("<Shift-Button-1>", self.start_pan)
+        self.canvas.bind("<Shift-B1-Motion>", self.pan_canvas)
+        self.canvas.bind("<Shift-ButtonRelease-1>", self.stop_pan)
         
         # Suporte para rolagem com o mouse (Windows e Linux)
         self.canvas.bind("<MouseWheel>", self.on_mouse_wheel)  # Windows
@@ -1507,9 +1507,13 @@ class VisionMapApp:
     
     def on_canvas_click(self, event):
         """Manipula o evento de clique no canvas."""
+        # Converter coordenadas da janela para coordenadas do canvas
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
+        
         if self.mode == "add_box":
             # Criar nova caixa
-            box = VisionMapBox(self.canvas, event.x, event.y)
+            box = VisionMapBox(self.canvas, canvas_x, canvas_y)
             self.boxes.append(box)
             
             # Verificar se a caixa está dentro de algum container
@@ -1520,7 +1524,7 @@ class VisionMapApp:
         
         elif self.mode == "add_note":
             # Criar nova caixa de anotação
-            note = NoteBox(self.canvas, event.x, event.y)
+            note = NoteBox(self.canvas, canvas_x, canvas_y)
             self.boxes.append(note)
             
             # Verificar se a anotação está dentro de algum container
@@ -1531,7 +1535,7 @@ class VisionMapApp:
         
         elif self.mode == "add_container":
             # Criar novo container
-            container = Container(self.canvas, event.x, event.y)
+            container = Container(self.canvas, canvas_x, canvas_y)
             self.containers.append(container)
             
             # Verificar se existem caixas que devem ser adicionadas ao container
@@ -1549,16 +1553,16 @@ class VisionMapApp:
             
             # Verificar se clicou no manipulador de redimensionamento de algum container
             for container in self.containers:
-                if container.is_on_resize_handle(event.x, event.y):
+                if container.is_on_resize_handle(canvas_x, canvas_y):
                     self.resizing_container = container
-                    container.start_resize(event.x, event.y)
+                    container.start_resize(canvas_x, canvas_y)
                     return
             
             clicked_on_item = False
             
             # Verificar se clicou na barra de título de algum container
             for container in self.containers:
-                if container.is_on_title_bar(event.x, event.y):
+                if container.is_on_title_bar(canvas_x, canvas_y):
                     if ctrl_pressed and self.is_selected_multiple(container):
                         # Se Ctrl pressionado e já está selecionado, remover da seleção
                         self.remove_from_selection(container)
@@ -1566,7 +1570,7 @@ class VisionMapApp:
                         # Adicionar à seleção ou selecionar único
                         if not ctrl_pressed:
                             self.selected_container = container
-                            container.select(event.x, event.y)
+                            container.select(canvas_x, canvas_y)
                         else:
                             self.add_to_selection(container)
                     clicked_on_item = True
@@ -1574,7 +1578,7 @@ class VisionMapApp:
             
             # Verificar se clicou em uma caixa existente
             for box in self.boxes:
-                if box.contains_point(event.x, event.y):
+                if box.contains_point(canvas_x, canvas_y):
                     if ctrl_pressed and self.is_selected_multiple(box):
                         # Se Ctrl pressionado e já está selecionado, remover da seleção
                         self.remove_from_selection(box)
@@ -1586,7 +1590,7 @@ class VisionMapApp:
                         elif not ctrl_pressed:
                             # Seleção única
                             self.selected_box = box
-                            box.select(event.x, event.y)
+                            box.select(canvas_x, canvas_y)
                         else:
                             # Adicionar à seleção múltipla
                             self.add_to_selection(box)
@@ -1595,7 +1599,7 @@ class VisionMapApp:
             
             # Verificar se clicou em um container
             for container in self.containers:
-                if container.contains_point(event.x, event.y):
+                if container.contains_point(canvas_x, canvas_y):
                     if ctrl_pressed and self.is_selected_multiple(container):
                         # Se Ctrl pressionado e já está selecionado, remover da seleção
                         self.remove_from_selection(container)
@@ -1607,7 +1611,7 @@ class VisionMapApp:
                         elif not ctrl_pressed:
                             # Seleção única
                             self.selected_container = container
-                            container.select(event.x, event.y)
+                            container.select(canvas_x, canvas_y)
                         else:
                             # Adicionar à seleção múltipla
                             self.add_to_selection(container)
@@ -1617,13 +1621,13 @@ class VisionMapApp:
             # Se não clicou em nenhum item e não está com Ctrl, iniciar seleção por arrastar
             if not clicked_on_item and not ctrl_pressed:
                 self.is_selecting = True
-                self.selection_start_x = event.x
-                self.selection_start_y = event.y
+                self.selection_start_x = canvas_x
+                self.selection_start_y = canvas_y
         
         elif self.mode == "connect":
             # Primeiro tentar com caixas
             for box in self.boxes:
-                if box.contains_point(event.x, event.y):
+                if box.contains_point(canvas_x, canvas_y):
                     if not self.temp_connection_start:
                         # Início da conexão
                         self.temp_connection_start = box
@@ -1649,9 +1653,13 @@ class VisionMapApp:
     
     def on_canvas_drag(self, event):
         """Manipula o evento de arrastar no canvas."""
+        # Converter coordenadas da janela para coordenadas do canvas
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
+        
         if self.resizing_container:
             # Redimensionar o container selecionado
-            self.resizing_container.resize(event.x, event.y)
+            self.resizing_container.resize(canvas_x, canvas_y)
         
         elif self.mode == "select":
             if self.is_selecting:
@@ -1661,7 +1669,7 @@ class VisionMapApp:
                 
                 self.selection_rectangle = self.canvas.create_rectangle(
                     self.selection_start_x, self.selection_start_y,
-                    event.x, event.y,
+                    canvas_x, canvas_y,
                     outline="blue", width=1, dash=(5, 5)
                 )
                 
@@ -1670,8 +1678,8 @@ class VisionMapApp:
                 if not self.is_moving_multiple:
                     # Primeira vez que move, calcular offsets e posição de referência
                     self.is_moving_multiple = True
-                    self.move_start_x = event.x
-                    self.move_start_y = event.y
+                    self.move_start_x = canvas_x
+                    self.move_start_y = canvas_y
                     
                     # Armazenar posições iniciais de todos os elementos
                     self.initial_positions = []
@@ -1683,8 +1691,8 @@ class VisionMapApp:
                         self.initial_positions.append(('container', container, container.x, container.y))
                 
                 # Calcular deslocamento total desde o início do movimento
-                dx_total = event.x - self.move_start_x
-                dy_total = event.y - self.move_start_y
+                dx_total = canvas_x - self.move_start_x
+                dy_total = canvas_y - self.move_start_y
                 
                 # Mover todos os elementos com o mesmo deslocamento
                 for item_type, item, initial_x, initial_y in self.initial_positions:
@@ -1719,7 +1727,7 @@ class VisionMapApp:
                 
             elif self.selected_box:
                 # Mover a caixa selecionada (comportamento original)
-                self.selected_box.move(event.x, event.y)
+                self.selected_box.move(canvas_x, canvas_y)
                 
                 # Se a caixa estava em um container e saiu, removê-la
                 if self.selected_box.container:
@@ -1748,7 +1756,7 @@ class VisionMapApp:
                 old_y = self.selected_container.y
                 
                 # Mover o container selecionado e todas as caixas dentro dele
-                self.selected_container.move(event.x, event.y)
+                self.selected_container.move(canvas_x, canvas_y)
                 
                 # Se o container estava em um container pai e saiu, removê-lo
                 if hasattr(self.selected_container, 'parent_container') and self.selected_container.parent_container:
@@ -1789,6 +1797,10 @@ class VisionMapApp:
     
     def on_canvas_release(self, event):
         """Manipula o evento de soltar o botão do mouse."""
+        # Converter coordenadas da janela para coordenadas do canvas
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
+        
         if self.resizing_container:
             # Finalizar o redimensionamento
             self.resizing_container.end_resize()
@@ -1800,7 +1812,7 @@ class VisionMapApp:
                 # Obter elementos dentro do retângulo de seleção
                 selected_items = self.get_selection_bounds(
                     self.selection_start_x, self.selection_start_y,
-                    event.x, event.y
+                    canvas_x, canvas_y
                 )
                 
                 # Adicionar itens à seleção múltipla
@@ -1856,16 +1868,20 @@ class VisionMapApp:
     
     def on_double_click(self, event):
         """Manipula o evento de duplo clique."""
+        # Converter coordenadas da janela para coordenadas do canvas
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
+        
         if self.mode == "select":
             # Verificar se clicou em uma caixa existente
             for box in self.boxes:
-                if box.contains_point(event.x, event.y):
+                if box.contains_point(canvas_x, canvas_y):
                     box.edit_text()
                     return
             
             # Verificar se clicou na barra de título de um container
             for container in self.containers:
-                if container.is_on_title_bar(event.x, event.y):
+                if container.is_on_title_bar(canvas_x, canvas_y):
                     container.edit_title()
                     return
     
@@ -2079,7 +2095,7 @@ class VisionMapApp:
             return item in self.selected_boxes
     
     def get_selection_bounds(self, x1, y1, x2, y2):
-        """Retorna os elementos dentro do retângulo de seleção."""
+        """Retorna os elementos dentro do retângulo de seleção (usando coordenadas do canvas)."""
         selected_items = []
         
         # Normalizar coordenadas do retângulo
@@ -2114,6 +2130,10 @@ class VisionMapApp:
             
     def on_right_click(self, event):
         """Manipula o evento de clique com o botão direito do mouse."""
+        # Converter coordenadas da janela para coordenadas do canvas
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
+        
         # Limpar seleção anterior da conexão
         if self.selected_connection:
             self.canvas.itemconfig(self.selected_connection.line, width=2, fill="gray")
@@ -2124,7 +2144,7 @@ class VisionMapApp:
         
         # Verificar caixas
         for box in self.boxes:
-            if box.contains_point(event.x, event.y):
+            if box.contains_point(canvas_x, canvas_y):
                 # Selecionar a caixa
                 if self.selected_box:
                     self.selected_box.deselect()
@@ -2133,7 +2153,7 @@ class VisionMapApp:
                     self.selected_container = None
                 
                 self.selected_box = box
-                box.select(event.x, event.y)
+                box.select(canvas_x, canvas_y)
                 clicked_on_item = True
                 # Mostrar menu de contexto para caixa
                 self.context_menu.post(event.x_root, event.y_root)
@@ -2142,7 +2162,7 @@ class VisionMapApp:
         # Se não clicou em uma caixa, verificar containers
         if not clicked_on_item:
             for container in self.containers:
-                if container.contains_point(event.x, event.y):
+                if container.contains_point(canvas_x, canvas_y):
                     # Selecionar o container
                     if self.selected_box:
                         self.selected_box.deselect()
@@ -2151,7 +2171,7 @@ class VisionMapApp:
                         self.selected_container.deselect()
                     
                     self.selected_container = container
-                    container.select(event.x, event.y)
+                    container.select(canvas_x, canvas_y)
                     clicked_on_item = True
                     # Mostrar menu de contexto para container
                     self.context_menu.post(event.x_root, event.y_root)
@@ -2160,7 +2180,7 @@ class VisionMapApp:
         # Se não clicou em caixa ou container, verificar conexões
         if not clicked_on_item:
             for connection in self.connections:
-                if connection.is_clicked(event.x, event.y):
+                if connection.is_clicked(canvas_x, canvas_y):
                     # Limpar outras seleções
                     if self.selected_box:
                         self.selected_box.deselect()
@@ -2941,6 +2961,7 @@ class VisionMapApp:
         # Mudar o cursor para indicar movimento
         self.canvas.config(cursor="fleur")  # Cursor de movimento
         self.panning = True
+        # Para pan, usamos as coordenadas da janela, não do canvas
         self.pan_start_x = event.x
         self.pan_start_y = event.y
     

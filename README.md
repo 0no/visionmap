@@ -52,6 +52,8 @@ O aplicativo usa o arquivo `logo.png` na pasta raiz como ícone da janela princi
 3. Operações básicas:
    - Clique duplo em uma caixa para editar seu texto ou na barra de título de um container para editar seu título
    - Use o modo "Selecionar" para arrastar e mover caixas ou containers
+   - Use Ctrl+clique para selecionar múltiplos elementos ao mesmo tempo
+   - Use o menu Canvas para ajustar o tamanho da área de desenho
    - Use o modo "Adicionar Container" para criar agrupadores de caixas relacionadas
    - Arraste caixas para dentro e fora dos containers para organizá-las
    - Redimensione os containers usando o manipulador no canto inferior direito
@@ -88,7 +90,7 @@ O aplicativo usa o arquivo `logo.png` na pasta raiz como ícone da janela princi
 
 ### Navegação e Canvas
 - `Botão do meio do mouse`: Arrastar para mover a visão do canvas
-- `Ctrl + Arrastar`: Arrastar para mover a visão do canvas (alternativa)
+- `Shift + Arrastar`: Arrastar para mover a visão do canvas (alternativa)
 - `Roda do mouse`: Rolar verticalmente
 - `Ctrl + Roda do mouse`: Rolar horizontalmente
 
