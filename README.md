@@ -1,6 +1,8 @@
 # VisionMap Creator
 
-Uma aplicação simples para4. Operações básicas:
+Um aplicativo Python para criação de mapas visuais interativos com suporte a caixas, anotações, containers e conexões.
+
+Operações básicas:
    - Clique duplo em uma caixa para editar seu texto ou na barra de título de um container para editar seu título
    - Use o menu Canvas para ajustar o tamanho da área de desenho, centralizar a visão ou ajustar o canvas ao conteúdoriar mapas visuais usando Python e Tkinter.
 

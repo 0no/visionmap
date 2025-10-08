@@ -1,0 +1,3 @@
+"""
+Utilitários e ferramentas auxiliares
+"""

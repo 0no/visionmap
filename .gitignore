@@ -1,5 +1,7 @@
 build
 dist
 build.txt
+backup
 *.spec
 __pycache__/
+backup
